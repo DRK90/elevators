@@ -13,18 +13,21 @@ const int MAX_CAPACITY = 8;
 const int INITIAL_SPEED = 10;
 const int IMPROVED_SPEED = 5;
 
-class Passenger
-{
+class Passenger {
 public:
+    enum Status { WAITING, PICKED_UP };
+
     int startTime;
     int startFloor;
     int endFloor;
     int waitTime;
     int travelTime;
+    Status status;
 
     Passenger(int _startTime, int _startFloor, int _endFloor)
-        : startTime(_startTime), startFloor(_startFloor), endFloor(_endFloor), waitTime(0), travelTime(0) {}
+        : startTime(_startTime), startFloor(_startFloor), endFloor(_endFloor), waitTime(0), travelTime(0), status(WAITING) {}
 };
+
 
 class Floor
 {
@@ -78,12 +81,14 @@ public:
         }
     }
 
-    void addPassengersFromFloor(Floor& floor) {
-        while (!floor.waitingPassengers.empty() && passengers.size() < MAX_CAPACITY) {
-            passengers.push_back(floor.waitingPassengers.front());
-            floor.waitingPassengers.pop();
-        }
+void addPassengersFromFloor(Floor& floor) {
+    while (!floor.waitingPassengers.empty() && passengers.size() < MAX_CAPACITY) {
+        Passenger* p = floor.waitingPassengers.front();
+        floor.waitingPassengers.pop();
+        passengers.push_back(p);
+        p->status = Passenger::Status::PICKED_UP;
     }
+}
 
     void updateState(std::vector<Floor>& floors, int currentTime) {
         if (state == STOPPED) {
@@ -103,10 +108,6 @@ public:
                 state = STOPPING;
                 stoppingTime = 2;
                 return;
-            }
-
-            for (Passenger* p : passengers) {
-                p->waitTime++;
             }
 
             if (currentFloor < NUM_FLOORS - 1) {
@@ -145,37 +146,67 @@ public:
             int endFloor = std::stoi(tokens[2]);
 
             passengers.emplace_back(startTime, startFloor, endFloor);
+            std::cout<<startTime<<" "<<startFloor<<" "<<endFloor<<"\n";
         }
 
         return passengers;
     }
 
-    void runSimulation(std::vector<Passenger> &passengers, int floorTravelTime)
-    {
-        std::vector<Elevator> elevators(NUM_ELEVATORS, Elevator(floorTravelTime));
-        std::vector<Floor> floors(NUM_FLOORS);
-        for (Passenger &p : passengers)
-        {
-            floors[p.startFloor].addPassenger(&p);
-        }
-
-        int currentTime = 0;
-        while (true)
-        {
-            bool allPassengersArrived = std::all_of(passengers.begin(), passengers.end(),
-                                                    [](const Passenger &p)
-                                                    { return p.travelTime > 0; });
-            if (allPassengersArrived)
-            {
-                break;
-            }
-
-            for (Elevator &elevator : elevators)
-            {
-                elevator.update(floors, currentTime);
-            }
-
-            currentTime++;
+bool hasElevatorMoving(const std::vector<Elevator>& elevators) {
+    for (const Elevator& elevator : elevators) {
+        if (elevator.state == Elevator::State::MOVING_UP || elevator.state == Elevator::State::MOVING_DOWN) {
+            return true;
         }
     }
+    return false;
+}
+
+void runSimulation(std::vector<Passenger>& passengers, const std::vector<Elevator>& initialElevators, int floorTravelTime) {
+    std::vector<Floor> floors(NUM_FLOORS);
+    for (Passenger& passenger : passengers) {
+        floors[passenger.startFloor].waitingPassengers.push(&passenger);
+    }
+
+    std::vector<Elevator> elevators = initialElevators;
+    for (Elevator& elevator : elevators) {
+        elevator.floorTravelTime = floorTravelTime;
+    }
+
+    int currentTime = 0;
+
+    while (!passengers.empty() || hasElevatorMoving(elevators)) {
+        for (Elevator& elevator : elevators) {
+            elevator.update(floors, currentTime);
+        }
+
+        for (Passenger& passenger : passengers) {
+            if (passenger.status == Passenger::Status::WAITING) {
+                passenger.waitTime++;
+            }
+        }
+
+        currentTime++;
+
+        // Remove passengers who have reached their destination
+        passengers.erase(std::remove_if(passengers.begin(), passengers.end(), [](const Passenger& p) {
+            return p.status == Passenger::Status::PICKED_UP && p.waitTime + p.travelTime <= currentTime;
+        }), passengers.end());
+    }
+
+    double averageWaitTime = 0;
+    double averageTravelTime = 0;
+
+    for (const Passenger& passenger : passengers) {
+        averageWaitTime += passenger.waitTime;
+        averageTravelTime += passenger.travelTime;
+    }
+
+    averageWaitTime /= passengers.size();
+    averageTravelTime /= passengers.size();
+
+    std::cout << "Floor Travel Time: " << floorTravelTime << " seconds" << std::endl;
+    std::cout << "Average Wait Time: " << averageWaitTime << " seconds" << std::endl;
+    std::cout << "Average Travel Time: " << averageTravelTime << " seconds" << std::endl;
+}
+
 
